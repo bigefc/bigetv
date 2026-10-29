@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BigEtv recordings</title>
+<style>
+  :root { --bg:#0e1116; --panel:#161b22; --line:#243042; --text:#e6edf3; --dim:#8b96a5; --blue:#3d7bff; --red:#ff6b6b; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  header { padding:16px; background:var(--panel); position:sticky; top:0; z-index:2; }
+  h1 { margin:0 0 10px; font-size:20px; color:var(--blue); }
+  h2 { font-size:17px; margin:22px 16px 8px; }
+  input { width:100%; padding:12px; border-radius:10px; border:1px solid var(--line); background:var(--bg); color:var(--text); font-size:16px; }
+  .list { margin:0 12px; }
+  .row { display:flex; align-items:center; gap:10px; padding:10px; border-bottom:1px solid var(--line); }
+  .row img { width:44px; height:30px; object-fit:contain; background:var(--line); border-radius:4px; }
+  .grow { flex:1; min-width:0; }
+  .sub { color:var(--dim); font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  button { border:0; border-radius:8px; padding:9px 12px; font-size:14px; background:var(--blue); color:#fff; white-space:nowrap; }
+  button.ghost { background:var(--line); }
+  button.stop { background:var(--red); }
+  .badge { font-size:12px; padding:2px 7px; border-radius:6px; background:var(--line); }
+  .badge.rec { background:var(--red); }
+  .quick { display:flex; gap:8px; flex-wrap:wrap; margin:10px 12px; }
+  .empty { color:var(--dim); padding:10px 16px; }
+  .row.set { background:rgba(255,107,107,.12); border-left:4px solid var(--red); }
+  .setlabel { color:var(--red); font-weight:600; font-size:13px; }
+  .btns { display:flex; flex-direction:column; gap:6px; }
+  .banner { margin:0 12px 10px; padding:12px; border-radius:10px; background:var(--red); display:flex; align-items:center; gap:10px; }
+  .banner button { background:#fff; color:var(--red); }
+  button:disabled { opacity:.6; }
+  #toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); background:var(--blue); padding:10px 16px; border-radius:10px; display:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>BigEtv recordings</h1>
+  <input id="q" placeholder="Search for a channel…" autocomplete="off">
+</header>
+
+<div id="channelView" style="display:none">
+  <h2 id="chName"></h2>
+  <div id="nowRec"></div>
+  <div class="quick" id="quick">
+    <button onclick="recordNow(this, 30)">● Record now 30 min</button>
+    <button onclick="recordNow(this, 60)">● 1 hour</button>
+    <button onclick="recordNow(this, 120)">● 2 hours</button>
+    <button class="ghost" onclick="closeChannel()">Back</button>
+  </div>
+  <div class="list" id="guide"></div>
+</div>
+
+<div id="pickView">
+  <h2 id="pickTitle">Favourite channels</h2>
+  <div class="list" id="channels"></div>
+</div>
+
+<div id="linksBox" style="display:none">
+  <h2>Series links</h2>
+  <div class="list" id="links"></div>
+</div>
+
+<h2>Recordings</h2>
+<div class="list" id="recs"></div>
+<div id="toast"></div>
+
+<script>
+let channel = null;
+const $ = id => document.getElementById(id);
+const time = t => new Date(t).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+const day = t => new Date(t).toLocaleDateString([], {weekday:'short', day:'numeric', month:'short'});
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// The PIN shown on the TV (Recordings screen) is asked for once and remembered on this phone.
+let pin;
+// Opened from the TV's QR code, the link ends "#k=<secret key>": requests then travel through
+// ntfy.sh, so this works anywhere. Opened from the Firestick's own address, it asks it directly.
+const key = (location.hash.match(/k=([a-z0-9-]+)/) || [])[1] || '';
+const pinKey = 'bigetvPin' + (key ? '-' + key : '');
+pin = () => { try { return localStorage.getItem(pinKey) || ''; } catch (e) { return ''; } };
+async function api(path) {
+  const url = path + (path.includes('?') ? '&' : '?') + 'pin=' + encodeURIComponent(pin());
+  let status, body;
+  if (key) {
+    ({status, body} = await relay(url));
+  } else {
+    const r = await fetch(url, {method: /^\/api\/(record|cancel|delete|series\/)/.test(path) ? 'POST' : 'GET'});
+    status = r.status; body = await r.json();
+  }
+  if (status === 401) {
+    const entered = prompt('Enter the 4-digit PIN shown on the TV (BigEtv → Recordings)');
+    if (!entered) throw new Error('PIN needed');
+    try { localStorage.setItem(pinKey, entered.trim()); } catch (e) {}
+    return api(path);
+  }
+  return body;
+}
+
+// ---- Away from home: requests and answers as ntfy.sh messages ----
+const NTFY = 'https://ntfy.sh/';
+const waiting = {};
+let answers = null;
+function listen() {
+  if (answers && answers.readyState !== 2) return answers.ready;
+  answers = new EventSource(NTFY + key + '-a/sse');
+  answers.ready = new Promise(ok => { answers.onopen = ok; });
+  answers.onmessage = e => {
+    let m; try { m = JSON.parse(JSON.parse(e.data).message); } catch (err) { return; }
+    const w = waiting[m.i]; if (!w) return;
+    w.pieces[m.n] = m.d; w.got++;
+    if (w.got === m.of) { delete waiting[m.i]; w.done(m.s, w.pieces.join('')); }
+  };
+  return answers.ready;
+}
+async function unzip(b64) {
+  const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+  return JSON.parse(await new Response(stream).text());
+}
+async function relay(url) {
+  await Promise.race([listen(), new Promise(ok => setTimeout(ok, 8000))]);
+  const id = Math.random().toString(36).slice(2, 12);
+  const answer = new Promise((ok, fail) => {
+    const t = setTimeout(() => { delete waiting[id]; fail(new Error('timeout')); }, 25000);
+    waiting[id] = {pieces: [], got: 0, done: (s, d) => { clearTimeout(t); ok({s, d}); }};
+  });
+  await fetch(NTFY + key + '-q', {method: 'POST', body: JSON.stringify({i: id, u: url})});
+  try {
+    const {s, d} = await answer;
+    setOffline(false);
+    return {status: s, body: await unzip(d)};
+  } catch (e) {
+    setOffline(true);
+    throw e;
+  }
+}
+function setOffline(off) {
+  let b = $('offline');
+  if (!b) { b = document.createElement('div'); b.id = 'offline'; b.className = 'empty'; document.body.prepend(b); }
+  b.textContent = off ? "The TV didn't answer. Check the Firestick is plugged in, BigEtv's phone scheduling is on, and try again." : '';
+  b.style.display = off ? 'block' : 'none';
+}
+
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2500); }
+
+let timer;
+$('q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(loadChannels, 300); });
+
+async function loadChannels() {
+  const q = $('q').value.trim();
+  $('pickTitle').textContent = q ? 'Channels' : 'Favourite channels';
+  const list = await api('/api/channels?q=' + encodeURIComponent(q));
+  $('channels').innerHTML = list.length ? list.map(c => `
+    <div class="row" onclick='openChannel(${JSON.stringify(c.id)}, ${JSON.stringify(c.name)})'>
+      <img src="${esc(c.logo)}" onerror="this.style.visibility='hidden'">
+      <div class="grow"><div>${esc(c.number)} · ${esc(c.name)} ${c.recording ? '<span class="badge rec">REC</span>' : ''}</div>
+      <div class="sub">${esc(c.now || '')}</div></div>
+    </div>`).join('') : `<div class="empty">${q ? 'No channels found' : 'Search for a channel above'}</div>`;
+}
+
+async function openChannel(id, name) {
+  channel = {id, name};
+  $('chName').textContent = name;
+  $('pickView').style.display = 'none';
+  $('channelView').style.display = 'block';
+  const g = await api('/api/guide?channel=' + encodeURIComponent(id));
+  const rec = g.recording;
+  // A banner while this channel is being recorded, however the recording was set.
+  $('nowRec').innerHTML = rec ? `
+    <div class="banner"><div class="grow"><b>● Recording now</b> until ${time(rec.stop)}<div class="sub" style="color:#fff">${esc(rec.title)}</div></div>
+    <button onclick='cancel(${JSON.stringify(rec.id)})'>Stop</button></div>` : '';
+  $('quick').querySelectorAll('button').forEach(b => { if (b.textContent.includes('●')) b.disabled = !!rec; });
+  const progs = g.programmes;
+  $('guide').innerHTML = progs.length ? progs.map(p => `
+    <div class="row ${p.recId ? 'set' : ''}">
+      <div class="grow"><div>${day(p.start)} ${time(p.start)}–${time(p.stop)} · ${esc(p.title)}</div>
+      ${p.recId ? `<div class="setlabel">● ${p.recState === 'Recording' ? 'Recording now' : 'Recording set'}</div>` : ''}
+      ${p.seriesId ? `<div class="setlabel">●● Series linked</div>` : ''}
+      <div class="sub">${esc(p.desc || '')}</div></div>
+      <div class="btns">
+      ${p.recId ? `<button class="ghost" onclick='cancel(${JSON.stringify(p.recId)})'>Cancel</button>`
+                : `<button onclick='record(this, ${p.start}, ${p.stop}, ${JSON.stringify(p.title)})'>● Record</button>`}
+      ${p.seriesId || !p.title ? '' : `<button onclick='series(this, ${JSON.stringify(p.title)})'>●● Series</button>`}
+      </div>
+    </div>`).join('') : '<div class="empty">No guide information for this channel — use Record now.</div>';
+}
+
+function closeChannel() { channel = null; $('channelView').style.display = 'none'; $('pickView').style.display = 'block'; }
+
+// One request at a time, so a second tap can't set the same recording twice.
+let busy = false;
+async function record(button, start, stop, title) {
+  if (busy) return;
+  busy = true;
+  // Show the tap has registered straight away.
+  button.textContent = '✓ Set';
+  button.disabled = true;
+  try {
+    const r = await api(`/api/record?channelId=${encodeURIComponent(channel.id)}&start=${start}&stop=${stop}&title=${encodeURIComponent(title)}`);
+    toast(r.error || (r.already ? 'Already set' : (start <= Date.now() ? '● Recording now' : '● Recording set')));
+  } catch (e) {
+    toast("Couldn't reach the Firestick");
+  } finally {
+    busy = false;
+    await openChannel(channel.id, channel.name);
+    await loadRecs();
+  }
+}
+function recordNow(button, minutes) { const now = Date.now(); record(button, now, now + minutes * 60000, channel.name); }
+
+async function series(button, title) {
+  if (busy) return;
+  busy = true;
+  button.textContent = '✓ Linked';
+  button.disabled = true;
+  try {
+    const r = await api(`/api/series/add?channelId=${encodeURIComponent(channel.id)}&title=${encodeURIComponent(title)}`);
+    toast(r.error || (r.already ? 'Already series linked' : `●● Series linked — ${r.upcoming} episode${r.upcoming === 1 ? '' : 's'} set so far`));
+  } catch (e) {
+    toast("Couldn't reach the Firestick");
+  } finally {
+    busy = false;
+    await openChannel(channel.id, channel.name);
+    await loadRecs();
+  }
+}
+
+async function unlink(id) {
+  if (!confirm('Cancel this series link? Episodes already recorded are kept.')) return;
+  await api('/api/series/remove?id=' + encodeURIComponent(id));
+  toast('Series link cancelled');
+  if (channel) openChannel(channel.id, channel.name);
+  loadRecs();
+}
+
+async function loadLinks() {
+  const list = await api('/api/series');
+  $('linksBox').style.display = list.length ? 'block' : 'none';
+  $('links').innerHTML = list.map(l => `
+    <div class="row">
+      <div class="grow"><div>●● ${esc(l.title)}</div>
+      <div class="sub">${esc(l.channel)} · ${l.upcoming} coming up</div></div>
+      <button class="ghost" onclick='unlink(${JSON.stringify(l.id)})'>Cancel</button>
+    </div>`).join('');
+}
+
+async function cancel(id) { await api('/api/cancel?id=' + encodeURIComponent(id)); toast('Cancelled'); if (channel) openChannel(channel.id, channel.name); loadRecs(); }
+async function del(id) { if (!confirm('Delete this recording? (A recording in progress is stopped first.)')) return; await api('/api/delete?id=' + encodeURIComponent(id)); loadRecs(); }
+
+async function loadRecs() {
+  loadLinks();
+  const list = await api('/api/recordings');
+  $('recs').innerHTML = list.length ? list.map(r => `
+    <div class="row">
+      <div class="grow"><div>${esc(r.title)} <span class="badge ${r.state === 'Recording' ? 'rec' : ''}">${esc(r.state)}</span></div>
+      <div class="sub">${esc(r.channel)} · ${day(r.start)} ${time(r.start)}–${time(r.stop)} ${r.size ? '· ' + esc(r.size) : ''} ${r.note ? '· ' + esc(r.note) : ''}</div></div>
+      ${r.state === 'Scheduled' ? `<button class="ghost" onclick='cancel(${JSON.stringify(r.id)})'>Cancel</button>` :
+        r.state === 'Recording' ? `<button class="stop" onclick='cancel(${JSON.stringify(r.id)})'>Stop</button>
+                                   <button class="ghost" onclick='del(${JSON.stringify(r.id)})'>Delete</button>` :
+        `<button class="ghost" onclick='del(${JSON.stringify(r.id)})'>Delete</button>`}
+    </div>`).join('') : '<div class="empty">No recordings yet</div>';
+}
+
+loadChannels(); loadRecs();
+// Away from home each refresh costs ntfy.sh messages, so refresh less often.
+setInterval(() => { if (!document.hidden) loadRecs(); }, key ? 60000 : 15000);
+</script>
+</body>
+</html>
