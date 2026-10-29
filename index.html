@@ -77,9 +77,29 @@ let pin;
 // ntfy.sh, so this works anywhere. Opened from the Firestick's own address, it asks it directly.
 const key = (location.hash.match(/k=([a-z0-9-]+)/) || [])[1] || '';
 const pinKey = 'bigetvPin' + (key ? '-' + key : '');
-pin = () => { try { return localStorage.getItem(pinKey) || ''; } catch (e) { return ''; } };
+// Also kept in memory, for browsers that don't let pages save anything (private mode, some
+// QR-scanner apps); otherwise the PIN would be asked for again on every request.
+let pinNow = '';
+pin = () => { try { return localStorage.getItem(pinKey) || pinNow; } catch (e) { return pinNow; } };
+let asking = null;
+async function askPin(wrong) {
+  // Requests that fail together share one question.
+  if (!asking) {
+    asking = new Promise(done => setTimeout(() => {
+      const entered = prompt((wrong ? "That PIN didn't match. " : '') + 'Enter the 4-digit PIN shown on the TV (BigEtv → Recordings)');
+      if (entered) {
+        pinNow = entered.replace(/\D/g, '');
+        try { localStorage.setItem(pinKey, pinNow); } catch (e) {}
+      }
+      asking = null;
+      done(!!entered);
+    }, 0));
+  }
+  return asking;
+}
 async function api(path) {
-  const url = path + (path.includes('?') ? '&' : '?') + 'pin=' + encodeURIComponent(pin());
+  const sent = pin();
+  const url = path + (path.includes('?') ? '&' : '?') + 'pin=' + encodeURIComponent(sent);
   let status, body;
   if (key) {
     ({status, body} = await relay(url));
@@ -88,9 +108,8 @@ async function api(path) {
     status = r.status; body = await r.json();
   }
   if (status === 401) {
-    const entered = prompt('Enter the 4-digit PIN shown on the TV (BigEtv → Recordings)');
-    if (!entered) throw new Error('PIN needed');
-    try { localStorage.setItem(pinKey, entered.trim()); } catch (e) {}
+    // Another request may have been given the right PIN meanwhile.
+    if (pin() === sent && !(await askPin(sent !== ''))) throw new Error('PIN needed');
     return api(path);
   }
   return body;
