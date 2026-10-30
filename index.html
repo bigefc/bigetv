@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BigEtv recordings</title>
+<title>BigEtv</title>
 <style>
-  :root { --bg:#0e1116; --panel:#161b22; --line:#243042; --text:#e6edf3; --dim:#8b96a5; --blue:#3d7bff; --red:#ff6b6b; }
+  :root { --bg:#081433; --panel:#0b1e4a; --line:#1d3a7a; --text:#fff6d8; --dim:#b4ae92; --blue:#d4af37; --red:#ff6b6b; --navy:#050b1f; }
   * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  body { margin:0; background:linear-gradient(160deg, #050b1f, #0b1e4a 45%, #13306f) fixed var(--bg); color:var(--text); font:16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
   header { padding:16px; background:var(--panel); position:sticky; top:0; z-index:2; }
   h1 { margin:0 0 10px; font-size:20px; color:var(--blue); }
   h2 { font-size:17px; margin:22px 16px 8px; }
@@ -17,8 +17,8 @@
   .row img { width:44px; height:30px; object-fit:contain; background:var(--line); border-radius:4px; }
   .grow { flex:1; min-width:0; }
   .sub { color:var(--dim); font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  button { border:0; border-radius:8px; padding:9px 12px; font-size:14px; background:var(--blue); color:#fff; white-space:nowrap; }
-  button.ghost { background:var(--line); }
+  button { border:0; border-radius:8px; padding:9px 12px; font-size:14px; background:var(--blue); color:var(--navy); font-weight:600; white-space:nowrap; }
+  button.ghost { background:var(--line); color:var(--text); }
   button.stop { background:var(--red); }
   .badge { font-size:12px; padding:2px 7px; border-radius:6px; background:var(--line); }
   .badge.rec { background:var(--red); }
@@ -30,14 +30,34 @@
   .banner { margin:0 12px 10px; padding:12px; border-radius:10px; background:var(--red); display:flex; align-items:center; gap:10px; }
   .banner button { background:#fff; color:var(--red); }
   button:disabled { opacity:.6; }
-  #toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); background:var(--blue); padding:10px 16px; border-radius:10px; display:none; }
+  .tiles { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; margin:14px 12px 4px; }
+  .tile { display:flex; font-weight:600; flex-direction:column; align-items:flex-start; justify-content:center; gap:4px; min-height:92px;
+          padding:14px; border-radius:14px; background:var(--panel); border:1px solid var(--line); color:var(--text);
+          font-size:17px; font-weight:600; text-align:left; white-space:normal; }
+  .tile .icon { font-size:30px; line-height:1; }
+  .tile .sub { font-weight:400; white-space:normal; }
+  .tile.on { border-color:var(--blue); background:rgba(212,175,55,.18); }
+  .drives { margin:10px 12px 0; padding:12px; border-radius:14px; background:var(--panel); border:1px solid var(--line); }
+  .drive { margin:6px 0; font-size:14px; }
+  .bar { height:8px; border-radius:4px; background:var(--line); margin-top:4px; overflow:hidden; }
+  .bar div { height:100%; background:var(--blue); }
+  .bar div.low { background:var(--red); }
+  .form { margin:0 12px; padding:12px; border-radius:14px; background:var(--panel); border:1px solid var(--line); display:flex; flex-direction:column; gap:10px; }
+  .form label { font-size:13px; color:var(--dim); }
+  .seg { display:flex; gap:8px; }
+  .seg button { flex:1; background:var(--line); color:var(--text); }
+  .seg button.on { background:var(--blue); color:var(--navy); }
+  #toast { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); background:var(--blue); color:var(--navy); padding:10px 16px; border-radius:10px; display:none; }
 </style>
 </head>
 <body>
 <header>
-  <h1>BigEtv recordings</h1>
+  <h1>BigEtv</h1>
   <input id="q" placeholder="Search for a channel…" autocomplete="off">
 </header>
+
+<div class="tiles" id="tiles"></div>
+<div class="drives" id="drives" style="display:none"></div>
 
 <div id="channelView" style="display:none">
   <h2 id="chName"></h2>
@@ -61,8 +81,38 @@
   <div class="list" id="links"></div>
 </div>
 
-<h2>Recordings</h2>
+<h2 id="recsTitle">Recordings</h2>
 <div class="list" id="recs"></div>
+<div id="addBox" style="display:none">
+  <h2 id="addTitle">Add a playlist</h2>
+  <div class="form">
+    <div class="sub" style="white-space:normal">Type the login your TV provider gave you. It goes straight to the TV on your home Wi-Fi.</div>
+    <div class="seg">
+      <button id="tX" class="on" onclick="setType('xtream')">Xtream login</button>
+      <button id="tM" onclick="setType('m3u')">M3U link</button>
+    </div>
+    <div><label>Name (optional)</label><input id="pName" placeholder="e.g. Home"></div>
+    <div><label id="lUrl">Server address</label><input id="pUrl" placeholder="http://example.com:8080" autocapitalize="off" autocorrect="off" inputmode="url"></div>
+    <div id="xFields">
+      <div><label>Username</label><input id="pUser" autocapitalize="off" autocorrect="off"></div>
+      <div style="margin-top:10px"><label>Password</label><input id="pPass" type="password"></div>
+    </div>
+    <div id="mFields" style="display:none"><label>TV guide (EPG) link, optional</label><input id="pEpg" autocapitalize="off" autocorrect="off" inputmode="url"></div>
+    <button id="pAdd" onclick="addPlaylist()" style="padding:13px;font-size:16px">Add playlist to the TV</button>
+    <div id="pMsg" class="sub" style="white-space:normal"></div>
+  </div>
+</div>
+<div id="backup" style="display:none">
+  <h2>Backup</h2>
+  <div class="list" style="padding:12px">
+    <div class="sub" style="white-space:normal;margin-bottom:10px">Saves BigEtv's set-up to this phone: playlists, favourites, hidden groups,
+      settings, reminders, the recordings list and series links (not the recorded videos). Use it before
+      reinstalling BigEtv or to copy your set-up to another Firestick. Keep the file private, it contains your playlist login.</div>
+    <button onclick="saveBackup()">Save a backup</button>
+    <button class="ghost" onclick="$('restoreFile').click()">Restore a backup…</button>
+    <input type="file" id="restoreFile" accept=".json,application/json" style="display:none" onchange="restoreBackup(this.files[0])">
+  </div>
+</div>
 <div id="toast"></div>
 
 <script>
@@ -70,7 +120,9 @@ let channel = null;
 const $ = id => document.getElementById(id);
 const time = t => new Date(t).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
 const day = t => new Date(t).toLocaleDateString([], {weekday:'short', day:'numeric', month:'short'});
-const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// A value for code inside onclick='…': names like "Ian's Favs" would otherwise end the attribute early.
+const js = v => esc(JSON.stringify(v));
 // The PIN shown on the TV (Recordings screen) is asked for once and remembered on this phone.
 let pin;
 // Opened from the TV's QR code, the link ends "#k=<secret key>": requests then travel through
@@ -165,12 +217,51 @@ function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.display
 let timer;
 $('q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(loadChannels, 300); });
 
+// ---- Big buttons: favourite folders, recordings, search, and free space ----
+let folderNow = null;
+const size = b => b >= 1e9 ? (b / 1e9).toFixed(1) + ' GB' : Math.round(b / 1e6) + ' MB';
+async function loadHome() {
+  const h = await api('/api/home');
+  // Only folders with channels in them; empty spare folders would just be clutter.
+  const tiles = h.folders.filter(f => f.count > 0).map(f => `
+    <button class="tile ${folderNow && folderNow.index === f.index ? 'on' : ''}" onclick='showFolder(${js(f)})'>
+      <span class="icon">⭐</span>${esc(f.name)}<span class="sub">${f.count} channel${f.count === 1 ? '' : 's'}</span></button>`);
+  if (!tiles.length && h.playlists) tiles.push(`<div class="tile"><span class="icon">⭐</span>No favourites yet
+      <span class="sub">On the TV, hold OK on a channel to add it to a favourite folder</span></div>`);
+  tiles.push(`<button class="tile" onclick="goTo('recsTitle')"><span class="icon">🔴</span>Recordings
+      <span class="sub">${h.recorded} recorded · ${h.upcoming} coming up</span></button>`);
+  tiles.push(`<button class="tile" onclick="$('q').focus()"><span class="icon">🔎</span>Find a channel
+      <span class="sub">Search every channel</span></button>`);
+  if (!key) tiles.push(`<button class="tile" onclick="showAdd()"><span class="icon">➕</span>Add a playlist
+      <span class="sub">Type a login here</span></button>`);
+  $('tiles').innerHTML = (h.playlist ? `<div class="sub" style="grid-column:1/-1">Playlist in use: ${esc(h.playlist)}</div>` : '') + tiles.join('');
+  if (h.drives.length) {
+    $('drives').style.display = 'block';
+    $('drives').innerHTML = '<b>Space for recordings</b>' + h.drives.map(d => {
+      const usedPct = d.total ? Math.round((d.total - d.free) / d.total * 100) : 0;
+      return `<div class="drive">💾 ${esc(d.label)}: <b>${size(d.free)} free</b> of ${size(d.total)}
+        <div class="bar"><div class="${d.free < 1e9 ? 'low' : ''}" style="width:${usedPct}%"></div></div></div>`;
+    }).join('') + (h.used ? `<div class="sub">Recordings use ${size(h.used)}</div>` : '');
+  }
+  if (!h.playlists && !key) showAdd();
+}
+function goTo(id) { $(id).scrollIntoView({behavior: 'smooth', block: 'start'}); }
+function showFolder(f) {
+  folderNow = f;
+  $('q').value = '';
+  closeChannel();
+  loadChannels();
+  loadHome();
+  goTo('pickTitle');
+}
+
 async function loadChannels() {
   const q = $('q').value.trim();
-  $('pickTitle').textContent = q ? 'Channels' : 'Favourite channels';
-  const list = await api('/api/channels?q=' + encodeURIComponent(q));
+  if (q) folderNow = null;
+  $('pickTitle').textContent = q ? 'Channels' : folderNow ? '⭐ ' + folderNow.name : 'Favourite channels';
+  const list = await api('/api/channels?q=' + encodeURIComponent(q) + (folderNow && !q ? '&folder=' + folderNow.index : ''));
   $('channels').innerHTML = list.length ? list.map(c => `
-    <div class="row" onclick='openChannel(${JSON.stringify(c.id)}, ${JSON.stringify(c.name)})'>
+    <div class="row" onclick='openChannel(${js(c.id)}, ${js(c.name)})'>
       <img src="${esc(c.logo)}" onerror="this.style.visibility='hidden'">
       <div class="grow"><div>${esc(c.number)} · ${esc(c.name)} ${c.recording ? '<span class="badge rec">REC</span>' : ''}</div>
       <div class="sub">${esc(c.now || '')}</div></div>
@@ -187,7 +278,7 @@ async function openChannel(id, name) {
   // A banner while this channel is being recorded, however the recording was set.
   $('nowRec').innerHTML = rec ? `
     <div class="banner"><div class="grow"><b>● Recording now</b> until ${time(rec.stop)}<div class="sub" style="color:#fff">${esc(rec.title)}</div></div>
-    <button onclick='cancel(${JSON.stringify(rec.id)})'>Stop</button></div>` : '';
+    <button onclick='cancel(${js(rec.id)})'>Stop</button></div>` : '';
   $('quick').querySelectorAll('button').forEach(b => { if (b.textContent.includes('●')) b.disabled = !!rec; });
   const progs = g.programmes;
   $('guide').innerHTML = progs.length ? progs.map(p => `
@@ -197,9 +288,9 @@ async function openChannel(id, name) {
       ${p.seriesId ? `<div class="setlabel">●● Series linked</div>` : ''}
       <div class="sub">${esc(p.desc || '')}</div></div>
       <div class="btns">
-      ${p.recId ? `<button class="ghost" onclick='cancel(${JSON.stringify(p.recId)})'>Cancel</button>`
-                : `<button onclick='record(this, ${p.start}, ${p.stop}, ${JSON.stringify(p.title)})'>● Record</button>`}
-      ${p.seriesId || !p.title ? '' : `<button onclick='series(this, ${JSON.stringify(p.title)})'>●● Series</button>`}
+      ${p.recId ? `<button class="ghost" onclick='cancel(${js(p.recId)})'>Cancel</button>`
+                : `<button onclick='record(this, ${p.start}, ${p.stop}, ${js(p.title)})'>● Record</button>`}
+      ${p.seriesId || !p.title ? '' : `<button onclick='series(this, ${js(p.title)})'>●● Series</button>`}
       </div>
     </div>`).join('') : '<div class="empty">No guide information for this channel — use Record now.</div>';
 }
@@ -259,7 +350,7 @@ async function loadLinks() {
     <div class="row">
       <div class="grow"><div>●● ${esc(l.title)}</div>
       <div class="sub">${esc(l.channel)} · ${l.upcoming} coming up</div></div>
-      <button class="ghost" onclick='unlink(${JSON.stringify(l.id)})'>Cancel</button>
+      <button class="ghost" onclick='unlink(${js(l.id)})'>Cancel</button>
     </div>`).join('');
 }
 
@@ -273,16 +364,88 @@ async function loadRecs() {
     <div class="row">
       <div class="grow"><div>${esc(r.title)} <span class="badge ${r.state === 'Recording' ? 'rec' : ''}">${esc(r.state)}</span></div>
       <div class="sub">${esc(r.channel)} · ${day(r.start)} ${time(r.start)}–${time(r.stop)} ${r.size ? '· ' + esc(r.size) : ''} ${r.note ? '· ' + esc(r.note) : ''}</div></div>
-      ${r.state === 'Scheduled' ? `<button class="ghost" onclick='cancel(${JSON.stringify(r.id)})'>Cancel</button>` :
-        r.state === 'Recording' ? `<button class="stop" onclick='cancel(${JSON.stringify(r.id)})'>Stop</button>
-                                   <button class="ghost" onclick='del(${JSON.stringify(r.id)})'>Delete</button>` :
-        `<button class="ghost" onclick='del(${JSON.stringify(r.id)})'>Delete</button>`}
+      ${r.state === 'Scheduled' ? `<button class="ghost" onclick='cancel(${js(r.id)})'>Cancel</button>` :
+        r.state === 'Recording' ? `<button class="stop" onclick='cancel(${js(r.id)})'>Stop</button>
+                                   <button class="ghost" onclick='del(${js(r.id)})'>Delete</button>` :
+        `<button class="ghost" onclick='del(${js(r.id)})'>Delete</button>`}
     </div>`).join('') : '<div class="empty">No recordings yet</div>';
 }
 
-loadChannels(); loadRecs();
+// ---- Backup (home Wi-Fi only: it holds the playlist login, so it never goes through ntfy.sh) ----
+if (!key) $('backup').style.display = 'block';
+async function backupCall(path, options) {
+  const r = await fetch(path + '?pin=' + encodeURIComponent(pin()), options);
+  if (r.status === 401) {
+    if (!(await askPin(pin() !== ''))) throw new Error('PIN needed');
+    return backupCall(path, options);
+  }
+  return r;
+}
+async function saveBackup() {
+  const r = await backupCall('/api/backup');
+  const blob = await r.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'BigEtv backup ' + new Date().toISOString().slice(0, 10) + '.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  toast('Backup saved to this phone');
+}
+async function restoreBackup(file) {
+  if (!file) return;
+  const text = await file.text();
+  $('restoreFile').value = '';
+  if (!confirm("Replace BigEtv's set-up on the TV with this backup?")) return;
+  const r = await backupCall('/api/restore', {method: 'POST', headers: {'Content-Type': 'application/json; charset=utf-8'}, body: text});
+  const res = await r.json();
+  if (res.ok) alert('Restored. BigEtv has closed on the TV: open it again to see your set-up.');
+  else alert(res.error || "That backup couldn't be restored");
+}
+
+// ---- Add a playlist (home Wi-Fi only, like backups: the login never goes through ntfy.sh) ----
+let pType = 'xtream';
+function setType(t) {
+  pType = t;
+  $('tX').className = t === 'xtream' ? 'on' : '';
+  $('tM').className = t === 'm3u' ? 'on' : '';
+  $('xFields').style.display = t === 'xtream' ? 'block' : 'none';
+  $('mFields').style.display = t === 'm3u' ? 'block' : 'none';
+  $('lUrl').textContent = t === 'xtream' ? 'Server address' : 'Playlist link';
+  $('pUrl').placeholder = t === 'xtream' ? 'http://example.com:8080' : 'http://…';
+}
+function showAdd() {
+  if (key) return;
+  $('addBox').style.display = 'block';
+  goTo('addTitle');
+}
+async function addPlaylist() {
+  $('pMsg').textContent = 'Checking the login with your provider…';
+  $('pAdd').disabled = true;
+  try {
+    const body = JSON.stringify({type: pType, name: $('pName').value, url: $('pUrl').value,
+      username: $('pUser').value, password: $('pPass').value, epg: $('pEpg').value});
+    const r = await backupCall('/api/playlist/add', {method: 'POST', headers: {'Content-Type': 'application/json; charset=utf-8'}, body});
+    const res = await r.json();
+    if (res.ok) {
+      $('pMsg').textContent = '✓ Added "' + res.name + '". The TV is loading its channels now (big playlists take a minute).';
+      $('pPass').value = '';
+      setTimeout(() => { loadHome(); loadChannels(); }, 4000);
+    } else {
+      $('pMsg').textContent = res.error || "That login didn't work";
+    }
+  } catch (e) {
+    $('pMsg').textContent = "Couldn't reach the TV. Check this phone is on the same Wi-Fi.";
+  } finally {
+    $('pAdd').disabled = false;
+  }
+}
+// The TV's first screen links here with "#add" (and its PIN), straight to this form.
+const hashPin = (location.hash.match(/pin=(\d+)/) || [])[1];
+if (hashPin && !key) { pinNow = hashPin; try { localStorage.setItem(pinKey, hashPin); } catch (e) {} }
+if (/add/.test(location.hash) && !key) showAdd();
+
+loadHome(); loadChannels(); loadRecs();
 // Away from home each refresh costs ntfy.sh messages, so refresh less often.
-setInterval(() => { if (!document.hidden) loadRecs(); }, key ? 60000 : 15000);
+setInterval(() => { if (!document.hidden) { loadRecs(); if (!key) loadHome(); } }, key ? 60000 : 15000);
 </script>
 </body>
 </html>
